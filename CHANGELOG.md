@@ -2,7 +2,41 @@
 
 ## [Unreleased](https://github.com/internetarchive/heritrix3/tree/HEAD)
 
-[Full Changelog](https://github.com/internetarchive/heritrix3/compare/3.15.0...HEAD)
+[Full Changelog](https://github.com/internetarchive/heritrix3/compare/3.16.0...HEAD)
+
+## [3.16.0](https://github.com/internetarchive/heritrix3/releases/tag/3.16.0)  (2026-07-03)
+
+[Download distribution zip](https://repo1.maven.org/maven2/org/archive/heritrix/heritrix/3.16.0/heritrix-3.16.0-dist.zip) (or [tar.gz](https://repo1.maven.org/maven2/org/archive/heritrix/heritrix/3.16.0/heritrix-3.16.0-dist.tar.gz))
+
+[Full Changelog](https://github.com/internetarchive/heritrix3/compare/3.15.0...3.16.0) | [Javadoc](https://www.javadoc.io/doc/org.archive.heritrix/heritrix-engine/3.16.0/index.html) | [Maven Central](https://search.maven.org/artifact/org.archive.heritrix/heritrix/3.16.0/pom)
+
+### New features
+
+* **PaginationBehavior**: Added a new behavior for `BrowserProcessor` that repeatedly clicks the "next-page" link and extracts links, enabling crawling of client-side paginated sites. ([#736](https://github.com/internetarchive/heritrix3/pull/736))
+
+### Bug fixes
+
+* **MitmProxy POST request fix**: Fixed a bug in `BrowserProcessor/MitmProxy` where POST requests were recorded with doubled headers and trailing nulls. ([#737](https://github.com/internetarchive/heritrix3/pull/737))
+* **BrowserProcessor cookie fix**: Added support for the new `Cookie.sameSite` value "default".
+* **Error logging**: The exception is now logged when creating a new job fails.
+* **Groovy profile**: Removed a stray closing brace `}` in the Groovy profile.
+
+### Dependency upgrades
+
+* **amqp-client**: 5.30.0 → 5.31.0
+* **central-publishing-maven-plugin**: 0.10.0 → 0.11.0
+* **dnsjava**: 3.6.4 → 3.6.5
+* **groovy-bom**: 5.0.5 → 5.0.6
+* **jackson-bom**: 2.21.3 → 2.22.0
+* **jaxb-runtime**: 4.0.7 → 4.0.9
+* **jetty** (jetty-bom, jetty-ee10-bom): 12.0.34 → 12.0.36
+* **jsch**: 2.28.2 → 2.28.3
+* **junit-jupiter**: 6.0.3 → 6.1.0
+* **kafka-clients**: 4.2.0 → 4.3.0
+* **maven-surefire-plugin**: 3.5.5 → 3.5.6
+* **Package**: From → To
+* **slf4j-bom**: 2.0.17 → 2.0.18
+* **spring** (spring-beans, spring-context, spring-core, spring-expression): 7.0.7 → 7.0.8
 
 ## [3.15.0](https://github.com/internetarchive/heritrix3/releases/tag/3.15.0)  (2026-05-26)
 
