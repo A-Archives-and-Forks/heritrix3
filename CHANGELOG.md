@@ -12,18 +12,23 @@
 
 ### New features
 
-* **PaginationBehavior**: Added a new behavior for `BrowserProcessor` that repeatedly clicks the "next-page" link and extracts links, enabling crawling of client-side paginated sites. ([#736](https://github.com/internetarchive/heritrix3/pull/736))
+* **PaginationBehavior**: Added a new behavior for `BrowserProcessor` that repeatedly clicks the "next-page" link and extracts links, enabling crawling of client-side paginated sites. [#736](https://github.com/internetarchive/heritrix3/pull/736)
 
 ### Bug fixes
 
-* **MitmProxy POST request fix**: Fixed a bug in `BrowserProcessor/MitmProxy` where POST requests were recorded with doubled headers and trailing nulls. ([#737](https://github.com/internetarchive/heritrix3/pull/737))
-* **BrowserProcessor cookie fix**: Added support for the new `Cookie.sameSite` value "default".
+* **BrowserProcessor:** [#742](https://github.com/internetarchive/heritrix3/pull/742)
+  * Improved subresource request failure handling.
+  * Implemented recording truncation based on length and timeout limits.
+  * Fixed content digest calculation for subresources.
+  * Ensured the `User-Agent` header is set correctly for browser requests.
+  * Handle WebDriver BiDi `Cookie.sameSite` value `default`.
+  * Fixed a bug in where POST requests were recorded with doubled headers and trailing nulls. [#737](https://github.com/internetarchive/heritrix3/pull/737)
 * **Error logging**: The exception is now logged when creating a new job fails.
-* **Groovy profile**: Removed a stray closing brace `}` in the Groovy profile.
+* **Groovy default profile**: Removed a stray closing brace `}`.
 
 ### Dependency upgrades
 
-* **amqp-client**: 5.30.0 → 5.31.0
+* **amqp-client**: 5.30.0 → 5.33.0
 * **central-publishing-maven-plugin**: 0.10.0 → 0.11.0
 * **dnsjava**: 3.6.4 → 3.6.5
 * **groovy-bom**: 5.0.5 → 5.0.6
@@ -31,10 +36,9 @@
 * **jaxb-runtime**: 4.0.7 → 4.0.9
 * **jetty** (jetty-bom, jetty-ee10-bom): 12.0.34 → 12.0.36
 * **jsch**: 2.28.2 → 2.28.3
-* **junit-jupiter**: 6.0.3 → 6.1.0
-* **kafka-clients**: 4.2.0 → 4.3.0
+* **junit-jupiter**: 6.0.3 → 6.1.1
+* **kafka-clients**: 4.2.0 → 4.3.1
 * **maven-surefire-plugin**: 3.5.5 → 3.5.6
-* **Package**: From → To
 * **slf4j-bom**: 2.0.17 → 2.0.18
 * **spring** (spring-beans, spring-context, spring-core, spring-expression): 7.0.7 → 7.0.8
 
