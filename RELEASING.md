@@ -8,7 +8,7 @@
 6. [Publish maven deployment](https://central.sonatype.com/publishing/deployments)
 7. Build docker images:
    ```bash
-   version=3.10.0
+   version=$(git describe --tags --abbrev=0)
    podman manifest create iipc/heritrix:$version
    podman build --build-arg version=$version --platform linux/amd64,linux/arm64 --manifest iipc/heritrix:$version docker
    podman manifest push --all iipc/heritrix:$version
