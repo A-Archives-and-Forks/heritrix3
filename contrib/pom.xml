@@ -102,6 +102,8 @@
 						</descriptor>
 					</descriptors>
 					<tarLongFileMode>posix</tarLongFileMode>
+					<!-- exclude dist artifacts from maven central release bundle -->
+					<attach>false</attach>
 				</configuration>
 				<executions>
 					<execution>
