@@ -2,7 +2,7 @@ ARG java=25
 
 FROM eclipse-temurin:${java}
 
-ARG version="3.14.1"
+ARG version="3.16.0"
 ARG user="heritrix"
 ARG userid=1001
 
@@ -27,7 +27,7 @@ WORKDIR /opt
 # download latest version according to:
 #   https://github.com/internetarchive/heritrix3/releases/tag/3.10.0
 RUN \
-    wget -O heritrix-${version}-dist.zip https://repo1.maven.org/maven2/org/archive/heritrix/heritrix/${version}/heritrix-${version}-dist.zip && \
+    wget -O heritrix-${version}-dist.zip https://github.com/internetarchive/heritrix3/releases/download/${version}/heritrix-${version}-dist.zip && \
     unzip heritrix-${version}-dist.zip && \
     rm heritrix-${version}-dist.zip && \
     mv heritrix-${version} heritrix && \

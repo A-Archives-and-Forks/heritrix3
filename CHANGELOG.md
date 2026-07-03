@@ -6,7 +6,7 @@
 
 ## [3.16.0](https://github.com/internetarchive/heritrix3/releases/tag/3.16.0)  (2026-07-03)
 
-[Download distribution zip](https://repo1.maven.org/maven2/org/archive/heritrix/heritrix/3.16.0/heritrix-3.16.0-dist.zip) (or [tar.gz](https://repo1.maven.org/maven2/org/archive/heritrix/heritrix/3.16.0/heritrix-3.16.0-dist.tar.gz))
+[Download distribution zip](https://github.com/internetarchive/heritrix3/releases/download/3.16.0/heritrix-3.16.0-dist.zip) (or [tar.gz](https://github.com/internetarchive/heritrix3/releases/download/3.16.0/heritrix-3.16.0-dist.tar.gz))
 
 [Full Changelog](https://github.com/internetarchive/heritrix3/compare/3.15.0...3.16.0) | [Javadoc](https://www.javadoc.io/doc/org.archive.heritrix/heritrix-engine/3.16.0/index.html) | [Maven Central](https://search.maven.org/artifact/org.archive.heritrix/heritrix/3.16.0/pom)
 
