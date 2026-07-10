@@ -101,6 +101,22 @@ class BrowserProcessorTest {
     }
 
     @Test
+    public void testBrowserRestart() throws IOException, InterruptedException {
+        long restartsBefore = browserProcessor.browserRestarts.get();
+        browserProcessor.webdriver.close(); // simulate the browser dying
+
+        CrawlURI crawlURI = newCrawlURI(baseUrl);
+        fetcher.process(crawlURI);
+        assertEquals(200, crawlURI.getFetchStatus());
+        browserProcessor.innerProcess(crawlURI);
+
+        assertEquals(restartsBefore + 1, browserProcessor.browserRestarts.get(),
+                "browser should have been restarted");
+        assertTrue(crawlURI.getAnnotations().contains("browser"),
+                "page should have been visited by the restarted browser");
+    }
+
+    @Test
     public void testDownload() throws IOException, InterruptedException {
         CrawlURI crawlURI = newCrawlURI(baseUrl + "download.bin");
         fetcher.process(crawlURI);

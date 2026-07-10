@@ -86,12 +86,13 @@ public class BrowserProcessor extends Processor {
     protected final CrawlController crawlController;
     protected MitmProxy proxy;
     protected final FetchHTTP2 fetcher;
-    protected LocalWebDriverBiDi webdriver;
+    protected volatile LocalWebDriverBiDi webdriver;
     protected final ApplicationEventPublisher eventPublisher;
     protected final Map<String, BrowserPage> pages = new ConcurrentHashMap<>();
     protected final Map<BrowsingContext.Context, String> pageIdsByContext = new ConcurrentHashMap<>();
     protected final ProcessorChain extractorChain = new ProcessorChain();
     protected final AtomicLong subresourcesRecorded = new AtomicLong();
+    protected final AtomicLong browserRestarts = new AtomicLong();
     protected List<Behavior> behaviors;
     protected String executable;
     protected List<String> options = List.of("--headless");
@@ -106,7 +107,7 @@ public class BrowserProcessor extends Processor {
         this.behaviors = List.of(new ScrollDownBehavior(), new ExtractLinksBehavior(uriErrorLoggerModule));
     }
 
-    public void stop() {
+    public synchronized void stop() {
         if (!isRunning) return;
         super.stop();
         if (proxy != null) {
@@ -170,6 +171,7 @@ public class BrowserProcessor extends Processor {
         builder.append(super.report());
         builder.append("  Pages visited: ").append(getURICount()).append("\n");
         builder.append("  Subresources recorded: ").append(subresourcesRecorded.get()).append("\n");
+        builder.append("  Browser restarts: ").append(browserRestarts.get()).append("\n");
         for (var behavior : behaviors) {
             builder.append(behavior.report());
         }
@@ -177,21 +179,66 @@ public class BrowserProcessor extends Processor {
     }
 
     private void visit(CrawlURI curi) {
+        for (int attempt = 0; ; attempt++) {
+            LocalWebDriverBiDi driver = webdriver;
+            try {
+                visit(curi, driver);
+                return;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            } catch (WebDriverException e) {
+                if (attempt == 0 && !driver.isAlive()) {
+                    logger.log(WARNING, "Browser died while visiting " + curi + ", restarting it", e);
+                    if (restartBrowser(driver)) continue; // retry once with the new browser
+                }
+                logger.log(WARNING, "WebDriver exception visiting " + curi, e);
+                return;
+            }
+        }
+    }
+
+    /**
+     * Replaces a dead browser with a freshly launched one. Threads that lose the race to restart
+     * still return true so they retry against the browser the winner launched.
+     *
+     * @return true if a live browser is now available, false if the restart failed or the
+     *         processor is stopping
+     */
+    private synchronized boolean restartBrowser(LocalWebDriverBiDi deadDriver) {
+        if (!isRunning) return false;
+        if (webdriver != deadDriver) return true; // another thread already restarted it
+        try {
+            deadDriver.close();
+        } catch (Exception e) {
+            logger.log(WARNING, "Error closing dead browser", e);
+        }
+        try {
+            webdriver = createWebDriver();
+            browserRestarts.incrementAndGet();
+            return true;
+        } catch (Exception e) {
+            logger.log(ERROR, "Failed to restart browser", e);
+            return false;
+        }
+    }
+
+    private void visit(CrawlURI curi, LocalWebDriverBiDi driver) throws InterruptedException {
         String pageId = UUID.randomUUID().toString();
-        var tab = webdriver.browsingContext().create(BrowsingContext.CreateType.tab).context();
+        var tab = driver.browsingContext().create(BrowsingContext.CreateType.tab).context();
         try {
             String userAgent = curi.getUserAgent();
             if (userAgent == null) userAgent = fetcher.getUserAgentProvider().getUserAgent();
-            BrowserPage page = new BrowserPage(curi, new IdleBarrier(), webdriver, tab, fetcher.getProxy(), userAgent);
+            BrowserPage page = new BrowserPage(curi, new IdleBarrier(), driver, tab, fetcher.getProxy(), userAgent);
             pages.put(pageId, page);
             pageIdsByContext.put(tab, pageId);
-            webdriver.network().addIntercept(List.of(Network.InterceptPhase.beforeRequestSent), List.of(tab),
+            driver.network().addIntercept(List.of(Network.InterceptPhase.beforeRequestSent), List.of(tab),
                     List.of(new Network.UrlPatternPattern("pattern", "http"),
                             new Network.UrlPatternPattern("pattern", "https")));
             BrowsingContext.NavigateResult navigation;
 
             try {
-                navigation = webdriver.browsingContext().navigate(tab, curi.getURI(), BrowsingContext.ReadinessState.complete);
+                navigation = driver.browsingContext().navigate(tab, curi.getURI(), BrowsingContext.ReadinessState.complete);
             } catch (WebDriverException e) {
                 if ("net::ERR_ABORTED".equals(e.getMessage())) return; // Chrome: probably download started
                 throw e;
@@ -208,21 +255,20 @@ public class BrowserProcessor extends Processor {
             for (Behavior behavior : behaviors) {
                 try {
                     behavior.run(page);
+                } catch (WebDriverException e) {
+                    if (!driver.isAlive()) throw e; // browser died: restart it and revisit the page
+                    logger.log(ERROR, "Error running " + behavior.getClass().getName() + " on " + curi, e);
                 } catch (Exception e) {
                     logger.log(ERROR, "Error running " + behavior.getClass().getName() + " on " + curi, e);
                 }
             }
 
             curi.getAnnotations().add("browser");
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } catch (WebDriverException e) {
-            logger.log(WARNING, "WebDriver exception visiting " + curi, e);
         } finally {
             pageIdsByContext.remove(tab);
             pages.remove(pageId);
             try {
-                webdriver.browsingContext().close(tab);
+                driver.browsingContext().close(tab);
             } catch (WebDriverException e) {
                 logger.log(WARNING, "Error closing tab for " + curi, e);
             }
@@ -255,48 +301,58 @@ public class BrowserProcessor extends Processor {
             throw new RuntimeException(e);
         }
         try {
-            Path profileDir = scratchDir.resolve("profile");
-            Files.createDirectories(profileDir);
-
-            // Firefox doesn't seem to allow setting prefs via capabilities with bidi
-            // so drop them in user.js instead
-            Files.writeString(profileDir.resolve("user.js"), """
-            // send localhost requests via the proxy too (for tests and local crawling)
-            user_pref('network.proxy.allow_hijacking_localhost', true);
-            
-            // disable downloads by setting to something that can't be created as a directory
-            user_pref('browser.download.dir', '/dev/null');
-            user_pref('browser.download.folderList', 2);
-            """);
-
-            int proxyPort = proxy.getPort();
-            var alwaysMatch = Map.of("acceptInsecureCerts", true,
-                    "proxy", new Session.ProxyConfiguration("manual",
-                            "127.0.0.1:" + proxyPort, "127.0.0.1:" + proxyPort));
-
-            List<Map<String,Object>> firstMatch = List.of(
-                    Map.of("browserName", "chrome",
-                            "goog:chromeOptions", Map.of(
-                                    "args", List.of("headless=new", "user-data-dir=" + profileDir,
-                                            "proxy-bypass-list=<-loopback>"),
-                                    "prefs", Map.of("download_restrictions", 3))),
-                    // Fallback for other browsers
-                    Map.of()
-            );
-            var capabilities = new Session.CapabilitiesRequest(alwaysMatch, firstMatch);
-
-
-            this.webdriver = new LocalWebDriverBiDi(executable, options, capabilities, profileDir);
+            this.webdriver = createWebDriver();
         } catch (Exception e) {
             logger.log(ERROR, "Error starting browser", e);
             throw new RuntimeException(e);
         }
-        webdriver.session().subscribe(List.of("browsingContext.contextCreated",
-                "network.beforeRequestSent"), null);
-        webdriver.on(Network.BeforeRequestSent.class, this::handleBeforeRequestSent);
     }
 
-    private void handleBeforeRequestSent(Network.BeforeRequestSent event) {
+    private LocalWebDriverBiDi createWebDriver() throws Exception {
+        Path scratchDir = crawlController.getScratchDir().getFile().toPath();
+        Path profileDir = scratchDir.resolve("profile");
+        Files.createDirectories(profileDir);
+
+        // Firefox doesn't seem to allow setting prefs via capabilities with bidi
+        // so drop them in user.js instead
+        Files.writeString(profileDir.resolve("user.js"), """
+        // send localhost requests via the proxy too (for tests and local crawling)
+        user_pref('network.proxy.allow_hijacking_localhost', true);
+
+        // disable downloads by setting to something that can't be created as a directory
+        user_pref('browser.download.dir', '/dev/null');
+        user_pref('browser.download.folderList', 2);
+        """);
+
+        int proxyPort = proxy.getPort();
+        var alwaysMatch = Map.of("acceptInsecureCerts", true,
+                "proxy", new Session.ProxyConfiguration("manual",
+                        "127.0.0.1:" + proxyPort, "127.0.0.1:" + proxyPort));
+
+        List<Map<String,Object>> firstMatch = List.of(
+                Map.of("browserName", "chrome",
+                        "goog:chromeOptions", Map.of(
+                                "args", List.of("headless=new", "user-data-dir=" + profileDir,
+                                        "proxy-bypass-list=<-loopback>"),
+                                "prefs", Map.of("download_restrictions", 3))),
+                // Fallback for other browsers
+                Map.of()
+        );
+        var capabilities = new Session.CapabilitiesRequest(alwaysMatch, firstMatch);
+
+        var driver = new LocalWebDriverBiDi(executable, options, capabilities, profileDir);
+        try {
+            driver.session().subscribe(List.of("browsingContext.contextCreated",
+                    "network.beforeRequestSent"), null);
+            driver.on(Network.BeforeRequestSent.class, event -> handleBeforeRequestSent(driver, event));
+        } catch (Exception e) {
+            driver.close();
+            throw e;
+        }
+        return driver;
+    }
+
+    private void handleBeforeRequestSent(LocalWebDriverBiDi driver, Network.BeforeRequestSent event) {
         if (event.request().url().startsWith("data:") || !event.isBlocked()) return;
         List<Network.Header> requestHeaders = event.request().headers();
         String pageId = pageIdsByContext.get(event.context());
@@ -311,7 +367,7 @@ public class BrowserProcessor extends Processor {
                 }
             }
         }
-        webdriver.network().continueRequestAsync(event.request().request(), requestHeaders)
+        driver.network().continueRequestAsync(event.request().request(), requestHeaders)
                 .exceptionally(e -> {
                     logger.log(WARNING, "Error continuing request " + event.request().url() + ": " + e);
                     return null;
