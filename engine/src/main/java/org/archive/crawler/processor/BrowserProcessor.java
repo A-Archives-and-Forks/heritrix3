@@ -311,7 +311,11 @@ public class BrowserProcessor extends Processor {
                 }
             }
         }
-        webdriver.network().continueRequestAsync(event.request().request(), requestHeaders);
+        webdriver.network().continueRequestAsync(event.request().request(), requestHeaders)
+                .exceptionally(e -> {
+                    logger.log(WARNING, "Error continuing request " + event.request().url() + ": " + e);
+                    return null;
+                });
     }
 
     private void handleProxyRequest(MitmProxy.Request proxyRequest) throws IOException {
