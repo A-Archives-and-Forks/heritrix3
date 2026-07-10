@@ -55,6 +55,8 @@ public class LocalWebDriverBiDi implements WebDriverBiDi, Closeable {
             .setDaemon(true)
             .build());
     private final String sessionId;
+    private final Object sendLock = new Object();
+    private CompletableFuture<?> sendChain = CompletableFuture.completedFuture(null);
     private static final String[] BROWSERS = new String[]{
             "firefox", "/Applications/Firefox.app/Contents/MacOS/firefox", "chromedriver"};
 
@@ -132,7 +134,20 @@ public class LocalWebDriverBiDi implements WebDriverBiDi, Closeable {
         logger.log(System.Logger.Level.TRACE, "BiDi SEND {0}", message);
         CompletableFuture<JSONObject> future = new CompletableFuture<>();
         commands.put(id, future);
-        webSocket.sendText(message, true);
+        // The JDK WebSocket only permits one outstanding send at a time, so queue sends one after
+        // another. If a send fails (e.g. connection lost) fail the command immediately rather than
+        // leaving it to time out.
+        synchronized (sendLock) {
+            sendChain = sendChain.handle((ignored, error) -> webSocket.sendText(message, true))
+                    .thenCompose(sendFuture -> sendFuture)
+                    .whenComplete((ignored, error) -> {
+                        if (error != null) {
+                            commands.remove(id);
+                            future.completeExceptionally(error instanceof WebDriverException ? error :
+                                    new WebDriverException("Failed to send " + method + " command", error));
+                        }
+                    });
+        }
         return future;
     }
 
