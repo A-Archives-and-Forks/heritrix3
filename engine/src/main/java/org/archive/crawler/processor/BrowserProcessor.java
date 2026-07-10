@@ -217,7 +217,11 @@ public class BrowserProcessor extends Processor {
         } finally {
             pageIdsByContext.remove(tab);
             pages.remove(pageId);
-            webdriver.browsingContext().close(tab);
+            try {
+                webdriver.browsingContext().close(tab);
+            } catch (WebDriverException e) {
+                logger.log(WARNING, "Error closing tab for " + curi, e);
+            }
         }
     }
 
