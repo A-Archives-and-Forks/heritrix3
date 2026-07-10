@@ -151,6 +151,13 @@ public class LocalWebDriverBiDi implements WebDriverBiDi, Closeable {
         return future;
     }
 
+    private void failPendingCommands(Throwable failure) {
+        for (Long id : commands.keySet()) {
+            var future = commands.remove(id);
+            if (future != null) future.completeExceptionally(failure);
+        }
+    }
+
     public <T extends BiDiEvent> void on(Class<T> eventClass, Consumer<T> handler) {
         String eventName = StringUtils.uncapitalize(eventClass.getEnclosingClass().getSimpleName()) + "." +
                 StringUtils.uncapitalize(eventClass.getSimpleName());
@@ -260,6 +267,13 @@ public class LocalWebDriverBiDi implements WebDriverBiDi, Closeable {
         @Override
         public void onError(WebSocket webSocket, Throwable error) {
             logger.log(System.Logger.Level.ERROR, "WebSocket error", error);
+            failPendingCommands(new WebDriverException("WebDriver connection error: " + error));
+        }
+
+        @Override
+        public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+            failPendingCommands(new WebDriverException("WebDriver connection closed: " + statusCode + " " + reason));
+            return null;
         }
     }
 }
