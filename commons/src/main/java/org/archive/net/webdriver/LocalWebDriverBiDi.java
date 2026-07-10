@@ -55,20 +55,43 @@ public class LocalWebDriverBiDi implements WebDriverBiDi, Closeable {
             .setDaemon(true)
             .build());
     private final String sessionId;
+    private final Thread shutdownHook;
     private final Object sendLock = new Object();
     private CompletableFuture<?> sendChain = CompletableFuture.completedFuture(null);
+    private static final int LAUNCH_TIMEOUT_SECONDS = 60;
     private static final String[] BROWSERS = new String[]{
             "firefox", "/Applications/Firefox.app/Contents/MacOS/firefox", "chromedriver"};
 
     public LocalWebDriverBiDi(String executable, List<String> options, Session.CapabilitiesRequest capabilities, Path profileDir)
             throws ExecutionException, InterruptedException, IOException {
         this.process = executable == null ? launchAnyBrowser(options, profileDir) : launchBrowser(executable, options, profileDir);
-        Runtime.getRuntime().addShutdownHook(new Thread(this.process::destroyForcibly));
-        new Thread(this::handleStderr).start();
-        webSocket = HttpClient.newHttpClient().newWebSocketBuilder()
-                .buildAsync(URI.create(webSocketUrl.get() + "/session"), new Listener())
-                .get();
-        sessionId = session().new_(capabilities).sessionId();
+        shutdownHook = new Thread(this.process::destroyForcibly);
+        Runtime.getRuntime().addShutdownHook(shutdownHook);
+        var stderrThread = new Thread(this::handleStderr, "LocalWebDriverBiDi-stderr");
+        stderrThread.setDaemon(true);
+        stderrThread.start();
+        try {
+            String url = webSocketUrl.get(LAUNCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            webSocket = HttpClient.newHttpClient().newWebSocketBuilder()
+                    .buildAsync(URI.create(url + "/session"), new Listener())
+                    .get(LAUNCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            sessionId = session().new_(capabilities).sessionId();
+        } catch (TimeoutException e) {
+            destroyProcess();
+            throw new IOException("Browser did not start within " + LAUNCH_TIMEOUT_SECONDS + " seconds", e);
+        } catch (Exception e) {
+            destroyProcess();
+            throw e;
+        }
+    }
+
+    private void destroyProcess() {
+        process.destroyForcibly();
+        try {
+            Runtime.getRuntime().removeShutdownHook(shutdownHook);
+        } catch (IllegalStateException ignored) {
+            // JVM is already shutting down
+        }
     }
 
     private static Process launchAnyBrowser(List<String> options, Path profileDir) throws IOException {
