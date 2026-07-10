@@ -109,15 +109,19 @@ public class BrowserProcessor extends Processor {
     public void stop() {
         if (!isRunning) return;
         super.stop();
-        try {
-            proxy.stop();
-        } catch (Exception e) {
-            logger.log(ERROR, "Error stopping proxy server", e);
+        if (proxy != null) {
+            try {
+                proxy.stop();
+            } catch (Exception e) {
+                logger.log(ERROR, "Error stopping proxy server", e);
+            }
         }
-        try {
-            webdriver.close();
-        } catch (Exception e) {
-            logger.log(ERROR, "Error closing WebDriverBiDi", e);
+        if (webdriver != null) {
+            try {
+                webdriver.close();
+            } catch (Exception e) {
+                logger.log(ERROR, "Error closing WebDriverBiDi", e);
+            }
         }
     }
 
