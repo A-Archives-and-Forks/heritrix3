@@ -189,7 +189,7 @@ public class BrowserProcessor extends Processor {
             try {
                 navigation = webdriver.browsingContext().navigate(tab, curi.getURI(), BrowsingContext.ReadinessState.complete);
             } catch (WebDriverException e) {
-                if (e.getMessage().equals("net::ERR_ABORTED")) return; // Chrome: probably download started
+                if ("net::ERR_ABORTED".equals(e.getMessage())) return; // Chrome: probably download started
                 throw e;
             }
             if (navigation.url().equals("about:blank")) return; // Firefox: probably download started
