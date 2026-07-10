@@ -174,6 +174,13 @@ public class LocalWebDriverBiDi implements WebDriverBiDi, Closeable {
         return future;
     }
 
+    /**
+     * Returns true if the browser process is running and the WebDriver connection is still open.
+     */
+    public boolean isAlive() {
+        return process.isAlive() && !webSocket.isInputClosed() && !webSocket.isOutputClosed();
+    }
+
     private void failPendingCommands(Throwable failure) {
         for (Long id : commands.keySet()) {
             var future = commands.remove(id);
@@ -236,13 +243,28 @@ public class LocalWebDriverBiDi implements WebDriverBiDi, Closeable {
     @Override
     public void close() throws IOException {
         try {
-            if (process.isAlive() && !webSocket.isInputClosed()) {
+            if (isAlive()) {
                 browser().close();
             }
         } catch (Exception e) {
             logger.log(System.Logger.Level.ERROR, "Error closing browser", e);
         }
         process.destroy();
+        try {
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+            }
+        } catch (InterruptedException e) {
+            process.destroyForcibly();
+            Thread.currentThread().interrupt();
+        }
+        try {
+            Runtime.getRuntime().removeShutdownHook(shutdownHook);
+        } catch (IllegalStateException ignored) {
+            // JVM is already shutting down
+        }
+        failPendingCommands(new WebDriverException("WebDriver connection closed"));
+        eventExecutor.shutdown();
     }
 
     private class Listener implements WebSocket.Listener {
