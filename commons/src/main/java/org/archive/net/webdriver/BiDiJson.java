@@ -111,7 +111,7 @@ class BiDiJson {
     @SuppressWarnings("unchecked")
     static <T> T fromJson(Object value, Class<T> type) {
         try {
-            if (value == JSONObject.NULL) {
+            if (value == JSONObject.NULL || type == Void.class) {
                 return null;
             }
             if (value == null || type.isPrimitive() || type.isAssignableFrom(value.getClass())) {
