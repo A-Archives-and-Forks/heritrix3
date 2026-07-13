@@ -54,7 +54,7 @@ public class MetadataRecordBuilder extends BaseWARCRecordBuilder {
             if (curi.forceFetch()) {
                 r.addLabel("force-fetch");
             }
-            if(StringUtils.isNotBlank(curi.getVia().toString())) {
+            if(curi.getVia() != null && StringUtils.isNotBlank(curi.getVia().toString())) {
                 r.addLabelValue("via", curi.getVia().toString());
             }
             if(StringUtils.isNotBlank(curi.getPathFromSeed())) {
