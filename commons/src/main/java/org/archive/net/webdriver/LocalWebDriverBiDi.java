@@ -55,18 +55,43 @@ public class LocalWebDriverBiDi implements WebDriverBiDi, Closeable {
             .setDaemon(true)
             .build());
     private final String sessionId;
+    private final Thread shutdownHook;
+    private final Object sendLock = new Object();
+    private CompletableFuture<?> sendChain = CompletableFuture.completedFuture(null);
+    private static final int LAUNCH_TIMEOUT_SECONDS = 60;
     private static final String[] BROWSERS = new String[]{
             "firefox", "/Applications/Firefox.app/Contents/MacOS/firefox", "chromedriver"};
 
     public LocalWebDriverBiDi(String executable, List<String> options, Session.CapabilitiesRequest capabilities, Path profileDir)
             throws ExecutionException, InterruptedException, IOException {
         this.process = executable == null ? launchAnyBrowser(options, profileDir) : launchBrowser(executable, options, profileDir);
-        Runtime.getRuntime().addShutdownHook(new Thread(this.process::destroyForcibly));
-        new Thread(this::handleStderr).start();
-        webSocket = HttpClient.newHttpClient().newWebSocketBuilder()
-                .buildAsync(URI.create(webSocketUrl.get() + "/session"), new Listener())
-                .get();
-        sessionId = session().new_(capabilities).sessionId();
+        shutdownHook = new Thread(this.process::destroyForcibly);
+        Runtime.getRuntime().addShutdownHook(shutdownHook);
+        var stderrThread = new Thread(this::handleStderr, "LocalWebDriverBiDi-stderr");
+        stderrThread.setDaemon(true);
+        stderrThread.start();
+        try {
+            String url = webSocketUrl.get(LAUNCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            webSocket = HttpClient.newHttpClient().newWebSocketBuilder()
+                    .buildAsync(URI.create(url + "/session"), new Listener())
+                    .get(LAUNCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            sessionId = session().new_(capabilities).sessionId();
+        } catch (TimeoutException e) {
+            destroyProcess();
+            throw new IOException("Browser did not start within " + LAUNCH_TIMEOUT_SECONDS + " seconds", e);
+        } catch (Exception e) {
+            destroyProcess();
+            throw e;
+        }
+    }
+
+    private void destroyProcess() {
+        process.destroyForcibly();
+        try {
+            Runtime.getRuntime().removeShutdownHook(shutdownHook);
+        } catch (IllegalStateException ignored) {
+            // JVM is already shutting down
+        }
     }
 
     private static Process launchAnyBrowser(List<String> options, Path profileDir) throws IOException {
@@ -132,8 +157,35 @@ public class LocalWebDriverBiDi implements WebDriverBiDi, Closeable {
         logger.log(System.Logger.Level.TRACE, "BiDi SEND {0}", message);
         CompletableFuture<JSONObject> future = new CompletableFuture<>();
         commands.put(id, future);
-        webSocket.sendText(message, true);
+        // The JDK WebSocket only permits one outstanding send at a time, so queue sends one after
+        // another. If a send fails (e.g. connection lost) fail the command immediately rather than
+        // leaving it to time out.
+        synchronized (sendLock) {
+            sendChain = sendChain.handle((ignored, error) -> webSocket.sendText(message, true))
+                    .thenCompose(sendFuture -> sendFuture)
+                    .whenComplete((ignored, error) -> {
+                        if (error != null) {
+                            commands.remove(id);
+                            future.completeExceptionally(error instanceof WebDriverException ? error :
+                                    new WebDriverException("Failed to send " + method + " command", error));
+                        }
+                    });
+        }
         return future;
+    }
+
+    /**
+     * Returns true if the browser process is running and the WebDriver connection is still open.
+     */
+    public boolean isAlive() {
+        return process.isAlive() && !webSocket.isInputClosed() && !webSocket.isOutputClosed();
+    }
+
+    private void failPendingCommands(Throwable failure) {
+        for (Long id : commands.keySet()) {
+            var future = commands.remove(id);
+            if (future != null) future.completeExceptionally(failure);
+        }
     }
 
     public <T extends BiDiEvent> void on(Class<T> eventClass, Consumer<T> handler) {
@@ -191,13 +243,28 @@ public class LocalWebDriverBiDi implements WebDriverBiDi, Closeable {
     @Override
     public void close() throws IOException {
         try {
-            if (process.isAlive() && !webSocket.isInputClosed()) {
+            if (isAlive()) {
                 browser().close();
             }
         } catch (Exception e) {
             logger.log(System.Logger.Level.ERROR, "Error closing browser", e);
         }
         process.destroy();
+        try {
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+            }
+        } catch (InterruptedException e) {
+            process.destroyForcibly();
+            Thread.currentThread().interrupt();
+        }
+        try {
+            Runtime.getRuntime().removeShutdownHook(shutdownHook);
+        } catch (IllegalStateException ignored) {
+            // JVM is already shutting down
+        }
+        failPendingCommands(new WebDriverException("WebDriver connection closed"));
+        eventExecutor.shutdown();
     }
 
     private class Listener implements WebSocket.Listener {
@@ -245,6 +312,13 @@ public class LocalWebDriverBiDi implements WebDriverBiDi, Closeable {
         @Override
         public void onError(WebSocket webSocket, Throwable error) {
             logger.log(System.Logger.Level.ERROR, "WebSocket error", error);
+            failPendingCommands(new WebDriverException("WebDriver connection error: " + error));
+        }
+
+        @Override
+        public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+            failPendingCommands(new WebDriverException("WebDriver connection closed: " + statusCode + " " + reason));
+            return null;
         }
     }
 }

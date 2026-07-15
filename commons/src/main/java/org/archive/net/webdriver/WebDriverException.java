@@ -23,4 +23,8 @@ public class WebDriverException extends RuntimeException {
     public WebDriverException(String message) {
         super(message);
     }
+
+    public WebDriverException(String message, Throwable cause) {
+        super(message, cause);
+    }
 }
